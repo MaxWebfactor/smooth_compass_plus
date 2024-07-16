@@ -7,7 +7,12 @@ import 'dart:math';
 // import 'package:flutter_sensors/flutter_sensors.dart';
 
 import 'package:flutter_sensors/flutter_sensors.dart';
+import 'package:location/location.dart';
+import 'package:sensors_plus/sensors_plus.dart' as senPls;
 import 'package:vector_math/vector_math.dart';
+import 'package:logger/logger.dart';
+import 'src/compass_ui.dart';
+import 'src/qibla_utils.dart';
 
 import 'src/compass_ui.dart';
 import 'src/qibla_utils.dart';

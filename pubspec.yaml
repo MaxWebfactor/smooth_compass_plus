@@ -1,6 +1,6 @@
 name: smooth_compass_plus
 description: updated version of smooth compass with animated rotation and custom widgets support for both(android and ios)
-version: 0.0.1+4
+version: 0.0.2+5
 homepage: https://github.com/Ahmad-Ayman/smooth_compass_plus
 repository: https://github.com/Ahmad-Ayman/smooth_compass_plus
 
@@ -17,6 +17,8 @@ dependencies:
 
   vector_math: ^2.1.4
   location: ^5.0.3
+  sensors_plus: ^5.0.1
+  logger: ^1.0.0
 platforms:
   android:
   ios:
