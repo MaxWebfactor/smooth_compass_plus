@@ -111,26 +111,29 @@ class _SmoothCompassWidgetState extends State<SmoothCompassWidget> {
                 locationData.latitude ?? 0,
                 locationData.longitude ?? 0,
               );
-              setState(() {
-                _compassStream = Stream.periodic(
-                  const Duration(milliseconds: 200),
-                  (_) {
-                    return CompassModel(
-                      turns: currentHeading / 360,
-                      angle: currentHeading * -1,
-                      qiblahOffset: qiblahOffset,
-                      source: 'GPS',
-                    );
-                  },
-                );
-              });
+              if (mounted) {
+                setState(() {
+                  _compassStream = Stream.periodic(
+                    const Duration(milliseconds: 200),
+                    (_) {
+                      return CompassModel(
+                        turns: currentHeading / 360,
+                        angle: currentHeading * -1,
+                        qiblahOffset: qiblahOffset,
+                        source: 'GPS',
+                      );
+                    },
+                  );
+                });
+              }
               magnetometerEventStream().listen((MagnetometerEvent event) {
                 double newHeading = atan2(event.y, event.x) * (180 / pi);
                 // if (newHeading < 0) newHeading += 360;
-                setState(() {
-                  currentHeading = newHeading;
-                  previousHeading = currentHeading;
-                });
+                if (mounted)
+                  setState(() {
+                    currentHeading = newHeading;
+                    previousHeading = currentHeading;
+                  });
               });
             }
           });
