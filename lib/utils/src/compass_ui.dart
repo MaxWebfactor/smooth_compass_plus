@@ -55,38 +55,84 @@ class _SmoothCompassWidgetState extends State<SmoothCompassWidget> {
   @override
   void initState() {
     super.initState();
-    _initializeCompassStream();
+    if (widget.forceGPS && widget.isQiblahCompass!) {
+      _initializeCompassStream();
+    }
+    // _initializeCompassStream();
   }
 
-  void _initializeCompassStream() async {
-    bool isGyroscope = await Compass().isCompassAvailable();
-    if (widget.forceGPS || !isGyroscope) {
+  void _initializeCompassStream() {
+    if (widget.forceGPS) {
       _getLocation().then((locationData) {
         if (locationData != null) {
           qiblahOffset = _calculateQiblahOffset(
             locationData.latitude ?? 0,
             locationData.longitude ?? 0,
           );
-          setState(() {
-            _compassStream = Stream.periodic(
-              const Duration(milliseconds: 200),
-              (_) {
-                return CompassModel(
-                  turns: currentHeading / 360,
-                  angle: currentHeading,
-                  qiblahOffset: qiblahOffset,
-                  source: 'GPS',
-                );
-              },
-            );
-          });
+          if (mounted) {
+            setState(() {
+              _compassStream = Stream.periodic(
+                const Duration(milliseconds: 100),
+                (_) {
+                  return CompassModel(
+                    turns: currentHeading / 360,
+                    angle: currentHeading * -1,
+                    qiblahOffset: qiblahOffset,
+                    source: 'GPS',
+                  );
+                },
+              );
+            });
+          }
           magnetometerEventStream().listen((MagnetometerEvent event) {
             double newHeading = atan2(event.y, event.x) * (180 / pi);
             // if (newHeading < 0) newHeading += 360;
-            setState(() {
-              currentHeading = newHeading;
-              previousHeading = currentHeading;
-            });
+            if (mounted)
+              setState(() {
+                currentHeading = newHeading;
+                previousHeading = currentHeading;
+              });
+          });
+        }
+      });
+    } else {
+      Compass().isCompassAvailable().then((isAvailable) {
+        if (isAvailable) {
+          setState(() {
+            _compassStream = Compass().compassUpdates(
+              interval: const Duration(milliseconds: 200),
+              azimuthFix: 0.0,
+            );
+          });
+        } else {
+          _getLocation().then((locationData) {
+            if (locationData != null) {
+              qiblahOffset = _calculateQiblahOffset(
+                locationData.latitude ?? 0,
+                locationData.longitude ?? 0,
+              );
+              setState(() {
+                _compassStream = Stream.periodic(
+                  const Duration(milliseconds: 200),
+                  (_) {
+                    return CompassModel(
+                      turns: currentHeading / 360,
+                      angle: currentHeading * -1,
+                      qiblahOffset: qiblahOffset,
+                      source: 'GPS',
+                    );
+                  },
+                );
+              });
+              magnetometerEventStream().listen((MagnetometerEvent event) {
+                double newHeading = atan2(event.y, event.x) * (180 / pi);
+                // if (newHeading < 0) newHeading += 360;
+                setState(() {
+                  currentHeading = newHeading;
+                  previousHeading = currentHeading;
+                });
+              });
+            }
           });
         }
       });
@@ -135,249 +181,30 @@ class _SmoothCompassWidgetState extends State<SmoothCompassWidget> {
   Widget build(BuildContext context) {
     /// check if the compass support available
     return widget.forceGPS && widget.isQiblahCompass!
-        ? FutureBuilder<bool>(
-            future: location.serviceEnabled(),
-            builder: (context, AsyncSnapshot<bool> serviceSnapshot) {
-              if (serviceSnapshot.connectionState == ConnectionState.waiting) {
-                return widget.loadingAnimation ??
-                    const Center(
-                      child: CircularProgressIndicator(),
-                    );
-              } else if (serviceSnapshot.data == false) {
-                return widget.errorLocationServiceWidget ??
-                    CustomErrorWidget(
-                      title: "Enable Location",
-                      onTap: () async {
-                        await location.requestService();
-                        setState(() {});
-                      },
-                      errMsg: 'Location service is disabled',
-                    );
+        ? StreamBuilder<CompassModel>(
+            stream: _compassStream,
+            builder: (context, AsyncSnapshot<CompassModel> snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting ||
+                  !snapshot.hasData) {
+                return widget.loadingAnimation != null
+                    ? widget.loadingAnimation!
+                    : const Center(
+                        child: CircularProgressIndicator(),
+                      );
               }
-
-              /// to Check Location permission if denied
-              return FutureBuilder<PermissionStatus>(
-                  future: location.hasPermission(),
-                  builder: (context,
-                      AsyncSnapshot<PermissionStatus> permissionSnapshot) {
-                    if (permissionSnapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return widget.loadingAnimation ??
-                          const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                    } else if ((permissionSnapshot.data!) ==
-                        PermissionStatus.denied) {
-                      return widget.errorLocationPermissionWidget ??
-                          CustomErrorWidget(
-                              errMsg:
-                                  "Please allow location permissions to get the qiblah direction for current location",
-                              title: "Allow Permissions",
-                              onTap: () async {
-                                var status = await location.requestPermission();
-
-                                if (status == PermissionStatus.granted ||
-                                    status == PermissionStatus.grantedLimited) {
-                                  setState(() {});
-                                }
-                              });
-                    } else if ((permissionSnapshot.data ??
-                            PermissionStatus.deniedForever) ==
-                        PermissionStatus.deniedForever) {
-                      return Platform.isAndroid
-                          ? widget.errorLocationPermissionWidget ??
-                              CustomErrorWidget(
-                                  onTap: () async {
-                                    await location.requestPermission();
-                                  },
-                                  title: "Open Settings",
-                                  errMsg: "Location is permanently denied")
-                          : const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 10),
-                              child: Center(
-                                child: Text(
-                                    "please enable location permission from settings"),
-                              ),
-                            );
-                    }
-                    return FutureBuilder<LocationData?>(
-                        future: location.getLocation(),
-                        builder: (context,
-                            AsyncSnapshot<LocationData?> positionSnapshot) {
-                          if (positionSnapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return widget.loadingAnimation ??
-                                const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                          } else {
-                            return StreamBuilder<CompassModel>(
-                              stream: _compassStream,
-                              builder: (context,
-                                  AsyncSnapshot<CompassModel> snapshot) {
-                                // if (snapshot.connectionState ==
-                                //         ConnectionState.waiting ||
-                                //     !snapshot.hasData) {
-                                //   return widget.loadingAnimation != null
-                                //       ? widget.loadingAnimation!
-                                //       : const Center(
-                                //           child:
-                                //               CircularProgressIndicator(),
-                                //         );
-                                // }
-                                if (widget.compassAsset == null) {
-                                  if (snapshot.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return widget.loadingAnimation ??
-                                        const Center(
-                                          child: CircularProgressIndicator(),
-                                        );
-                                  }
-                                  // if (snapshot.hasError) {
-                                  //   return widget.loadingAnimation != null
-                                  //       ? widget.loadingAnimation!
-                                  //       : const Center(
-                                  //           child:
-                                  //               CircularProgressIndicator(),
-                                  //         );
-                                  // }
-                                  if (snapshot.hasError) {
-                                    return Text(snapshot.error.toString());
-                                  }
-                                  return
-                                      //   Column(
-                                      //   children: [
-                                      //     Text(
-                                      //         'Using ${snapshot.data?.source ?? 'Sensor'}'), // Display the source
-                                      //     widget.compassBuilder == null
-                                      //         ? _defaultWidget(
-                                      //             snapshot, context)
-                                      //         : widget.compassBuilder!(
-                                      //             context,
-                                      //             snapshot,
-                                      //             widget.compassAsset ??
-                                      //                 Container()), // Replace with your default asset
-                                      //   ],
-                                      // );
-                                      widget.compassBuilder == null
-                                          ? _defaultWidget(snapshot, context)
-                                          : widget.compassBuilder!(
-                                              context,
-                                              snapshot,
-                                              _defaultWidget(
-                                                  snapshot, context));
-                                }
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return widget.loadingAnimation ??
-                                      const Center(
-                                        child: CircularProgressIndicator(),
-                                      );
-                                }
-                                if (snapshot.hasError) {
-                                  return Text(snapshot.error.toString());
-                                }
-                                return widget.compassBuilder == null
-                                    ? AnimatedRotation(
-                                        turns: snapshot.data!.turns * -1,
-                                        duration: Duration(
-                                            milliseconds:
-                                                widget.rotationSpeed!),
-                                        child: widget.compassAsset!,
-                                      )
-                                    : widget.compassBuilder!(
-                                        context,
-                                        snapshot,
-                                        AnimatedRotation(
-                                          turns: snapshot.data!.turns * -1,
-                                          duration: Duration(
-                                              milliseconds:
-                                                  widget.rotationSpeed!),
-                                          child: widget.compassAsset!,
-                                        ),
-                                      );
-                              },
-                            );
-
-                            // StreamBuilder<CompassModel>(
-                            //   stream: Compass().compassUpdates(
-                            //       interval: const Duration(
-                            //         milliseconds: 200,
-                            //       ),
-                            //       azimuthFix: 0.0,
-                            //       currentLoc: MyLoc(
-                            //           latitude: positionSnapshot
-                            //                   .data?.latitude ??
-                            //               0,
-                            //           longitude: positionSnapshot
-                            //                   .data?.longitude ??
-                            //               0)),
-                            //   builder: (context,
-                            //       AsyncSnapshot<CompassModel>
-                            //           snapshot) {
-                            //     if (widget.compassAsset == null) {
-                            //       if (snapshot.connectionState ==
-                            //           ConnectionState.waiting) {
-                            //         return widget.loadingAnimation ??
-                            //             const Center(
-                            //               child:
-                            //                   CircularProgressIndicator(),
-                            //             );
-                            //       }
-                            //       if (snapshot.hasError) {
-                            //         return Text(
-                            //             snapshot.error.toString());
-                            //       }
-                            //       return widget.compassBuilder == null
-                            //           ? _defaultWidget(
-                            //               snapshot, context)
-                            //           : widget.compassBuilder!(
-                            //               context,
-                            //               snapshot,
-                            //               _defaultWidget(
-                            //                   snapshot, context));
-                            //     } else {
-                            //       if (snapshot.connectionState ==
-                            //           ConnectionState.waiting) {
-                            //         return widget.loadingAnimation ??
-                            //             const Center(
-                            //               child:
-                            //                   CircularProgressIndicator(),
-                            //             );
-                            //       }
-                            //       if (snapshot.hasError) {
-                            //         return Text(
-                            //             snapshot.error.toString());
-                            //       }
-                            //       return widget.compassBuilder == null
-                            //           ? AnimatedRotation(
-                            //               turns:
-                            //                   snapshot.data!.turns * -1,
-                            //               duration: Duration(
-                            //                   milliseconds: widget
-                            //                       .rotationSpeed!),
-                            //               child: widget.compassAsset!,
-                            //             )
-                            //           : widget.compassBuilder!(
-                            //               context,
-                            //               snapshot,
-                            //               AnimatedRotation(
-                            //                 turns:
-                            //                     snapshot.data!.turns *
-                            //                         -1,
-                            //                 duration: Duration(
-                            //                     milliseconds: widget
-                            //                         .rotationSpeed!),
-                            //                 child: widget.compassAsset!,
-                            //               ),
-                            //             );
-                            //     }
-                            //   },
-                            // );
-                          }
-                        });
-                  });
-            })
+              if (snapshot.hasError) {
+                return widget.loadingAnimation != null
+                    ? widget.loadingAnimation!
+                    : const Center(
+                        child: CircularProgressIndicator(),
+                      );
+              }
+              return widget.compassBuilder == null
+                  ? _defaultWidget(snapshot, context)
+                  : widget.compassBuilder!(
+                      context, snapshot, widget.compassAsset ?? Container());
+            },
+          )
         : FutureBuilder(
             future: Compass().isCompassAvailable(),
             builder: (BuildContext context, AsyncSnapshot<bool> snapshot) {
@@ -390,266 +217,30 @@ class _SmoothCompassWidgetState extends State<SmoothCompassWidget> {
               }
               if (!snapshot.data! && widget.isQiblahCompass!) {
                 /// Handle GPS
-                return FutureBuilder<bool>(
-                    future: location.serviceEnabled(),
-                    builder: (context, AsyncSnapshot<bool> serviceSnapshot) {
-                      if (serviceSnapshot.connectionState ==
-                          ConnectionState.waiting) {
-                        return widget.loadingAnimation ??
-                            const Center(
+                return StreamBuilder<CompassModel>(
+                  stream: _compassStream,
+                  builder: (context, AsyncSnapshot<CompassModel> snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting ||
+                        !snapshot.hasData) {
+                      return widget.loadingAnimation != null
+                          ? widget.loadingAnimation!
+                          : const Center(
                               child: CircularProgressIndicator(),
                             );
-                      } else if (serviceSnapshot.data == false) {
-                        return widget.errorLocationServiceWidget ??
-                            CustomErrorWidget(
-                              title: "Enable Location",
-                              onTap: () async {
-                                await location.requestService();
-                                setState(() {});
-                              },
-                              errMsg: 'Location service is disabled',
+                    }
+                    if (snapshot.hasError) {
+                      return widget.loadingAnimation != null
+                          ? widget.loadingAnimation!
+                          : const Center(
+                              child: CircularProgressIndicator(),
                             );
-                      }
-
-                      /// to Check Location permission if denied
-                      return FutureBuilder<PermissionStatus>(
-                          future: location.hasPermission(),
-                          builder: (context,
-                              AsyncSnapshot<PermissionStatus>
-                                  permissionSnapshot) {
-                            if (permissionSnapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return widget.loadingAnimation ??
-                                  const Center(
-                                    child: CircularProgressIndicator(),
-                                  );
-                            } else if ((permissionSnapshot.data!) ==
-                                PermissionStatus.denied) {
-                              return widget.errorLocationPermissionWidget ??
-                                  CustomErrorWidget(
-                                      errMsg:
-                                          "Please allow location permissions to get the qiblah direction for current location",
-                                      title: "Allow Permissions",
-                                      onTap: () async {
-                                        var status =
-                                            await location.requestPermission();
-
-                                        if (status ==
-                                                PermissionStatus.granted ||
-                                            status ==
-                                                PermissionStatus
-                                                    .grantedLimited) {
-                                          setState(() {});
-                                        }
-                                      });
-                            } else if ((permissionSnapshot.data ??
-                                    PermissionStatus.deniedForever) ==
-                                PermissionStatus.deniedForever) {
-                              return Platform.isAndroid
-                                  ? widget.errorLocationPermissionWidget ??
-                                      CustomErrorWidget(
-                                          onTap: () async {
-                                            await location.requestPermission();
-                                          },
-                                          title: "Open Settings",
-                                          errMsg:
-                                              "Location is permanently denied")
-                                  : const Padding(
-                                      padding:
-                                          EdgeInsets.symmetric(horizontal: 10),
-                                      child: Center(
-                                        child: Text(
-                                            "please enable location permission from settings"),
-                                      ),
-                                    );
-                            }
-                            return FutureBuilder<LocationData?>(
-                                future: location.getLocation(),
-                                builder: (context,
-                                    AsyncSnapshot<LocationData?>
-                                        positionSnapshot) {
-                                  if (positionSnapshot.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return widget.loadingAnimation ??
-                                        const Center(
-                                          child: CircularProgressIndicator(),
-                                        );
-                                  } else {
-                                    return StreamBuilder<CompassModel>(
-                                      stream: _compassStream,
-                                      builder: (context,
-                                          AsyncSnapshot<CompassModel>
-                                              snapshot) {
-                                        // if (snapshot.connectionState ==
-                                        //         ConnectionState.waiting ||
-                                        //     !snapshot.hasData) {
-                                        //   return widget.loadingAnimation != null
-                                        //       ? widget.loadingAnimation!
-                                        //       : const Center(
-                                        //           child:
-                                        //               CircularProgressIndicator(),
-                                        //         );
-                                        // }
-                                        if (widget.compassAsset == null) {
-                                          if (snapshot.connectionState ==
-                                              ConnectionState.waiting) {
-                                            return widget.loadingAnimation ??
-                                                const Center(
-                                                  child:
-                                                      CircularProgressIndicator(),
-                                                );
-                                          }
-                                          // if (snapshot.hasError) {
-                                          //   return widget.loadingAnimation != null
-                                          //       ? widget.loadingAnimation!
-                                          //       : const Center(
-                                          //           child:
-                                          //               CircularProgressIndicator(),
-                                          //         );
-                                          // }
-                                          if (snapshot.hasError) {
-                                            return Text(
-                                                snapshot.error.toString());
-                                          }
-                                          return
-                                              //   Column(
-                                              //   children: [
-                                              //     Text(
-                                              //         'Using ${snapshot.data?.source ?? 'Sensor'}'), // Display the source
-                                              //     widget.compassBuilder == null
-                                              //         ? _defaultWidget(
-                                              //             snapshot, context)
-                                              //         : widget.compassBuilder!(
-                                              //             context,
-                                              //             snapshot,
-                                              //             widget.compassAsset ??
-                                              //                 Container()), // Replace with your default asset
-                                              //   ],
-                                              // );
-                                              widget.compassBuilder == null
-                                                  ? _defaultWidget(
-                                                      snapshot, context)
-                                                  : widget.compassBuilder!(
-                                                      context,
-                                                      snapshot,
-                                                      _defaultWidget(
-                                                          snapshot, context));
-                                        }
-                                        if (snapshot.connectionState ==
-                                            ConnectionState.waiting) {
-                                          return widget.loadingAnimation ??
-                                              const Center(
-                                                child:
-                                                    CircularProgressIndicator(),
-                                              );
-                                        }
-                                        if (snapshot.hasError) {
-                                          return Text(
-                                              snapshot.error.toString());
-                                        }
-                                        return widget.compassBuilder == null
-                                            ? AnimatedRotation(
-                                                turns:
-                                                    snapshot.data!.turns * -1,
-                                                duration: Duration(
-                                                    milliseconds:
-                                                        widget.rotationSpeed!),
-                                                child: widget.compassAsset!,
-                                              )
-                                            : widget.compassBuilder!(
-                                                context,
-                                                snapshot,
-                                                AnimatedRotation(
-                                                  turns:
-                                                      snapshot.data!.turns * -1,
-                                                  duration: Duration(
-                                                      milliseconds: widget
-                                                          .rotationSpeed!),
-                                                  child: widget.compassAsset!,
-                                                ),
-                                              );
-                                      },
-                                    );
-
-                                    // StreamBuilder<CompassModel>(
-                                    //   stream: Compass().compassUpdates(
-                                    //       interval: const Duration(
-                                    //         milliseconds: 200,
-                                    //       ),
-                                    //       azimuthFix: 0.0,
-                                    //       currentLoc: MyLoc(
-                                    //           latitude: positionSnapshot
-                                    //                   .data?.latitude ??
-                                    //               0,
-                                    //           longitude: positionSnapshot
-                                    //                   .data?.longitude ??
-                                    //               0)),
-                                    //   builder: (context,
-                                    //       AsyncSnapshot<CompassModel>
-                                    //           snapshot) {
-                                    //     if (widget.compassAsset == null) {
-                                    //       if (snapshot.connectionState ==
-                                    //           ConnectionState.waiting) {
-                                    //         return widget.loadingAnimation ??
-                                    //             const Center(
-                                    //               child:
-                                    //                   CircularProgressIndicator(),
-                                    //             );
-                                    //       }
-                                    //       if (snapshot.hasError) {
-                                    //         return Text(
-                                    //             snapshot.error.toString());
-                                    //       }
-                                    //       return widget.compassBuilder == null
-                                    //           ? _defaultWidget(
-                                    //               snapshot, context)
-                                    //           : widget.compassBuilder!(
-                                    //               context,
-                                    //               snapshot,
-                                    //               _defaultWidget(
-                                    //                   snapshot, context));
-                                    //     } else {
-                                    //       if (snapshot.connectionState ==
-                                    //           ConnectionState.waiting) {
-                                    //         return widget.loadingAnimation ??
-                                    //             const Center(
-                                    //               child:
-                                    //                   CircularProgressIndicator(),
-                                    //             );
-                                    //       }
-                                    //       if (snapshot.hasError) {
-                                    //         return Text(
-                                    //             snapshot.error.toString());
-                                    //       }
-                                    //       return widget.compassBuilder == null
-                                    //           ? AnimatedRotation(
-                                    //               turns:
-                                    //                   snapshot.data!.turns * -1,
-                                    //               duration: Duration(
-                                    //                   milliseconds: widget
-                                    //                       .rotationSpeed!),
-                                    //               child: widget.compassAsset!,
-                                    //             )
-                                    //           : widget.compassBuilder!(
-                                    //               context,
-                                    //               snapshot,
-                                    //               AnimatedRotation(
-                                    //                 turns:
-                                    //                     snapshot.data!.turns *
-                                    //                         -1,
-                                    //                 duration: Duration(
-                                    //                     milliseconds: widget
-                                    //                         .rotationSpeed!),
-                                    //                 child: widget.compassAsset!,
-                                    //               ),
-                                    //             );
-                                    //     }
-                                    //   },
-                                    // );
-                                  }
-                                });
-                          });
-                    });
+                    }
+                    return widget.compassBuilder == null
+                        ? _defaultWidget(snapshot, context)
+                        : widget.compassBuilder!(context, snapshot,
+                            widget.compassAsset ?? Container());
+                  },
+                );
               }
 
               /// start compass stream
