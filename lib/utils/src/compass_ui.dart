@@ -72,7 +72,7 @@ class _SmoothCompassWidgetState extends State<SmoothCompassWidget> {
           if (mounted) {
             setState(() {
               _compassStream = Stream.periodic(
-                const Duration(milliseconds: 100),
+                const Duration(milliseconds: 200),
                 (_) {
                   return CompassModel(
                     turns: currentHeading / 360,
